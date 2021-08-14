@@ -22,6 +22,10 @@ def pil_loader(path):
     # (https://github.com/python-pillow/Pillow/issues/835)
     with open(path, 'rb') as f:
         with Image.open(f) as img:
+            try :
+              img.convert('RGB')
+            except Exception as e:
+              print("-------------------ERR--------------------\n",path)
             return img.convert('RGB')
 
 
@@ -140,12 +144,48 @@ class MonoDataset(data.Dataset):
 
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
-
+       
+        #print("Index: ",index)
+        #print("Filenames: ",self.filenames[index])
         line = self.filenames[index].split()
+        #try:
+        #        folder = line[0]
+        #except IndexError:
+        #        print("Filenames: ", self.filenames)
+        #        print("Index: ",index)
+        #        print("Line: ",line)
+        #        print(line[0])
+        #print("Line: ",line)
+        
         folder = line[0]
+        if "nyu" in self.data_path:
+            if folder[0] != "/":
+                folder= folder.split('/')[0]
+                #print(folder)
+            else:
+                folder= folder.split('/')[1]
+        elif "UmonsIndoorDataset" in self.data_path:
+            folder = os.path.dirname(folder)
+            #print("foldeer ",folder)
 
-        if len(line) == 3:
-            frame_index = int(line[1])
+        if len(line) == 3 or (len(line) == 2 and "nyu" not in self.data_path):
+            if "nyu" in self.data_path:
+
+                frame_name = line[0].split('/')[-1]
+                #print(frame_name)
+                start = frame_name.index( "_" ) + 1
+                end = frame_name.index( ".", start )
+                frame_index= int(frame_name[start:end])
+            elif "UmonsIndoorDataset" in self.data_path:
+                frame_name = os.path.basename(line[0])
+                #print("f name ",frame_name)
+                frame_index = int(frame_name.split(".")[0][4:])
+                #print("f indx ",frame_index)
+            else:
+                frame_index = int(line[1])
+                # print("frame ind : ",frame_index)
+        elif len(line) == 1:
+            frame_index = int((folder.split('/')[2]).split('_')[2])
         else:
             frame_index = 0
 

@@ -27,7 +27,7 @@ def export_gt_depths_kitti():
                         type=str,
                         help='which split to export gt from',
                         required=True,
-                        choices=["eigen", "eigen_benchmark"])
+                        choices=["eigen", "eigen_benchmark","nyu_Depth","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3"])
     opt = parser.parse_args()
 
     split_folder = os.path.join(os.path.dirname(__file__), "splits", opt.split)
@@ -37,20 +37,34 @@ def export_gt_depths_kitti():
 
     gt_depths = []
     for line in lines:
-        folder, frame_id, _ = line.split()
-        frame_id = int(frame_id)
+        if opt.split == "nyu_Depth" or "umons" in opt.split :
+            #folder = (line.split()[0]).split("/")[0]
+            
+            #frame_name = (line.split()[0]).split('/')[-1]
+            #start = frame_name.index( "_" ) + 1
+            #end = frame_name.index( ".", start )
+            #frame_id= int(frame_name[start:end])
 
-        if opt.split == "eigen":
-            calib_dir = os.path.join(opt.data_path, folder.split("/")[0])
-            velo_filename = os.path.join(
-                opt.data_path, folder,
-                "velodyne_points/data", "{:010d}.bin".format(frame_id))
-            gt_depth = generate_depth_map(calib_dir, velo_filename, 2, True)
-        elif opt.split == "eigen_benchmark":
             gt_depth_path = os.path.join(
-                opt.data_path, folder, "proj_depth",
-                "groundtruth", "image_02", "{:010d}.png".format(frame_id))
-            gt_depth = np.array(pil.open(gt_depth_path)).astype(np.float32) / 256
+                opt.data_path, line.split()[1])
+            gt_depth = np.array(pil.open(gt_depth_path)).astype(np.float32) / 1000
+
+        else:
+            folder, frame_id, _ = line.split()
+            frame_id = int(frame_id)
+
+            if opt.split == "eigen":
+                calib_dir = os.path.join(opt.data_path, folder.split("/")[0])
+                velo_filename = os.path.join(
+                    opt.data_path, folder,
+                    "velodyne_points/data", "{:010d}.bin".format(frame_id))
+                gt_depth = generate_depth_map(calib_dir, velo_filename, 2, True)
+            elif opt.split == "eigen_benchmark":
+                gt_depth_path = os.path.join(
+                    opt.data_path, folder, "proj_depth",
+                    "groundtruth", "image_02", "{:010d}.png".format(frame_id))
+                gt_depth = np.array(pil.open(gt_depth_path)).astype(np.float32) / 256
+            
 
         gt_depths.append(gt_depth.astype(np.float32))
 

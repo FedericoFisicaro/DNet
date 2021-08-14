@@ -38,7 +38,7 @@ class MonodepthOptions:
             "--split",
             type=str,
             help="which training split to use",
-            choices=["eigen_zhou", "eigen_full", "odom", "benchmark"],
+            choices=["eigen_zhou", "eigen_full", "odom", "benchmark", "nyu_Depth", "cityscapes","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3"],
             default="eigen_zhou")
         self.parser.add_argument(
             "--num_layers",
@@ -51,7 +51,7 @@ class MonodepthOptions:
             type=str,
             help="dataset to train on",
             default="kitti",
-            choices=["kitti", "kitti_odom", "kitti_depth", "kitti_test"])
+            choices=["kitti", "kitti_odom", "kitti_depth", "kitti_test", "NYUDepth", "cityscapes", "umons"])
         self.parser.add_argument(
             "--png",
             help="if set, trains from raw KITTI png files (instead of jpgs)",
@@ -119,6 +119,11 @@ class MonodepthOptions:
             type=int,
             help="step size of the scheduler",
             default=15)
+        self.parser.add_argument(
+            "--num_steps",
+            type=int,
+            help="Number of optimization step to run for online training",
+            default=20)
 
         # ABLATION options
         self.parser.add_argument(
@@ -228,7 +233,7 @@ class MonodepthOptions:
             type=str,
             default="eigen",
             choices=[
-                "eigen", "eigen_benchmark", "benchmark", "odom_9", "odom_10"],
+                "eigen", "eigen_benchmark", "benchmark", "odom_9", "odom_10", "nyu_Depth","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3"],
             help="which split to run eval on")
         self.parser.add_argument(
             "--save_pred_disps",

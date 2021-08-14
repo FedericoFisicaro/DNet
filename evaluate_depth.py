@@ -59,8 +59,8 @@ def batch_post_process_disparity(l_disp, r_disp):
 def evaluate(opt):
     """Evaluates a pretrained model using a specified test set
     """
-    MIN_DEPTH = 1e-3
-    MAX_DEPTH = 80
+    MIN_DEPTH = opt.min_depth
+    MAX_DEPTH = opt.max_depth
 
     K = np.array([[0.58, 0, 0.5, 0],
                   [0, 1.92, 0.5, 0],
@@ -86,7 +86,15 @@ def evaluate(opt):
         encoder_dict = torch.load(encoder_path)
 
         img_ext = '.png' if opt.png else '.jpg'
-        dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
+
+        datasets_dict = {
+            "kitti": datasets.KITTIRAWDataset,
+            "kitti_odom": datasets.KITTIOdomDataset,
+            "NYUDepth":datasets.NYURAWDataset,
+            "umons": datasets.UmonsRAWDataset}
+        datasetf = datasets_dict[opt.dataset]
+
+        dataset = datasetf(opt.data_path, filenames,
                                            encoder_dict['height'], encoder_dict['width'],
                                            [0], 4, is_train=False, img_ext=img_ext)
         dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
