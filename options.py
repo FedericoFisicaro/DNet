@@ -38,7 +38,7 @@ class MonodepthOptions:
             "--split",
             type=str,
             help="which training split to use",
-            choices=["eigen_zhou", "eigen_full", "odom", "benchmark", "nyu_Depth", "cityscapes","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3"],
+            choices=["eigen_zhou", "eigen_full", "odom", "benchmark", "nyu_Depth", "cityscapes","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3","AllOF-AllH","AllOF-H1","AllOF-H2","AllOF-H3","OF1-AllH","OF1-H1","OF1-H2","OF1-H3","BigRoom-H1","BigRoom-H2","BigRoom-H3","DevRoom-H1","DevRoom-H2","DevRoom-H3","OF2-H1","OF2-H2","OF2-H3","onlineRef"],
             default="eigen_zhou")
         self.parser.add_argument(
             "--num_layers",
@@ -233,7 +233,7 @@ class MonodepthOptions:
             type=str,
             default="eigen",
             choices=[
-                "eigen", "eigen_benchmark", "benchmark", "odom_9", "odom_10", "nyu_Depth","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3"],
+                "eigen", "eigen_benchmark", "benchmark", "odom_9", "odom_10", "nyu_Depth","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3","BigRoom-H1","BigRoom-H2","BigRoom-H3","DevRoom-H1","DevRoom-H2","DevRoom-H3","OF2-H1","OF2-H2","OF2-H3","OF1-H1","OF1-H2","OF1-H3","obj","ref"],
             help="which split to run eval on")
         self.parser.add_argument(
             "--save_pred_disps",

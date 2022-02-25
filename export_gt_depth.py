@@ -27,7 +27,7 @@ def export_gt_depths_kitti():
                         type=str,
                         help='which split to export gt from',
                         required=True,
-                        choices=["eigen", "eigen_benchmark","nyu_Depth","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3"])
+                        choices=["eigen", "eigen_benchmark","nyu_Depth","umonsALL","umonsH1","umonsH2","umonsH3","umonsH1-H2","umonsH1-H3","umonsH2-H3","BigRoom-H1","BigRoom-H2","BigRoom-H3","DevRoom-H1","DevRoom-H2","DevRoom-H3","OF2-H1","OF2-H2","OF2-H3","OF1-H1","OF1-H2","OF1-H3","ref","obj"])
     opt = parser.parse_args()
 
     split_folder = os.path.join(os.path.dirname(__file__), "splits", opt.split)
@@ -37,7 +37,7 @@ def export_gt_depths_kitti():
 
     gt_depths = []
     for line in lines:
-        if opt.split == "nyu_Depth" or "umons" in opt.split :
+        if opt.split == "nyu_Depth" or "umons" in opt.split or "-H" in opt.split or opt.split == "obj" or opt.split == "ref":
             #folder = (line.split()[0]).split("/")[0]
             
             #frame_name = (line.split()[0]).split('/')[-1]

@@ -8,7 +8,6 @@ from __future__ import absolute_import, division, print_function
 
 import numpy as np
 import time
-import datetime
 
 import torch
 import torch.nn.functional as F
@@ -30,13 +29,14 @@ from IPython import embed
 class OnlineTrainer:
     def __init__(self, options):
         self.opt = options
-        if self.opt.batch_size != 1 :
-            raise ValueError('Batch size must be 1 to perform online training')
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
         # checking height and width are multiples of 32
         assert self.opt.height % 32 == 0, "'height' must be a multiple of 32"
         assert self.opt.width % 32 == 0, "'width' must be a multiple of 32"
+
+        assert self.opt.num_epochs == 1,"Num epochs should be 1 for online training"
+        assert self.opt.batch_size == 1,"Batch size should be 1 for online training"
 
         self.models = {}
         self.parameters_to_train = []
@@ -112,6 +112,8 @@ class OnlineTrainer:
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
+        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
+            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
@@ -125,25 +127,28 @@ class OnlineTrainer:
             "kitti": datasets.KITTIRAWDataset,
             "kitti_odom": datasets.KITTIOdomDataset,
             "NYUDepth": datasets.NYURAWDataset,
-            "cityscapes": datasets.CityscapesRAWDataset}
+            "cityscapes": datasets.CityscapesRAWDataset,
+            "umons": datasets.UmonsRAWDataset}
         self.dataset = datasets_dict[self.opt.dataset]
 
-        filenames = self.createFilesListForOnlineTraining()
-        
+        fpath = os.path.join(os.path.dirname(__file__), "splits", self.opt.split, "{}_files.txt")
+
+        train_filenames = readlines(fpath.format("train"))
         img_ext = '.png' if self.opt.png else '.jpg'
 
-        num_samples = len(filenames)
-        self.num_total_steps = num_samples // self.opt.batch_size * self.opt.num_epochs
+        num_train_samples = len(train_filenames)
+        self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
-        online_dataset = self.dataset(
-            self.opt.data_path, filenames, self.opt.height, self.opt.width,
+        train_dataset = self.dataset(
+            self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
-        self.online_loader = DataLoader(
-            online_dataset, self.opt.batch_size, True,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+        self.train_loader = DataLoader(
+            train_dataset, self.opt.batch_size, True,
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)        
 
         self.writers = {}
-        self.writers["online"] = SummaryWriter(os.path.join(self.log_path, "online"))
+        for mode in ["train", "val"]:
+            self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
         if not self.opt.no_ssim:
             self.ssim = SSIM()
@@ -165,117 +170,81 @@ class OnlineTrainer:
             "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
 
         print("Using split:\n  ", self.opt.split)
-        print("Online refinement will be performed on {:d} items\n".format(
-            len(online_dataset)))
+        print("Sequence of {:d} frames\n".format(len(train_dataset)))
 
-    def createFilesListForOnlineTraining(self):
-        """TODO ADD COMMENT
-        """
-        fpath = os.path.join(os.path.dirname(__file__), "splits", self.opt.eval_split, "{}_files.txt")
-        unique_file_name = (str(datetime.datetime.now().date()) + '_' +
-                str(datetime.datetime.now().time()).replace(':', '_'))
-        unique_file = os.path.join(os.path.dirname(__file__), "splits", self.opt.eval_split, unique_file_name + '.txt')
-        with open(fpath.format("test"), 'r') as f:
-            lines = f.read().splitlines()
-    
-        with open(unique_file, 'w') as f_out:
-            fetches_network = self.opt.num_steps * self.opt.batch_size
-            fetches_saves = self.opt.batch_size * int(np.floor(self.opt.num_steps))
-            repetitions = fetches_network + 3 * fetches_saves
-            for i in range(len(lines)):
-                for _ in range(repetitions):
-                    f_out.write(lines[i] + '\n')
+        self.save_opts()
 
-        with open(unique_file, 'r') as f_out:
-            lines = f_out.read().splitlines()
-        #TODO del file temp
-        return lines
-    
     def set_train(self):
         """Convert all models to training mode
         """
         for m in self.models.values():
             m.train()
 
+    def set_eval(self):
+        """Convert all models to testing/evaluation mode
+        """
+        for m in self.models.values():
+            m.eval()
+
     def train(self):
         """Run the entire training pipeline
-        """ 
+        """
+        self.epoch = 0
+        self.step = 0
         self.start_time = time.time()
-        
-        self.run_epoch()
-
-    def onlineInference(self, inputs):
-        encoder = self.models["encoder"]
-        depth_decoder = self.models["depth"]
-
-        encoder.cuda()
-        encoder.eval()
-        depth_decoder.cuda()
-        depth_decoder.eval()
-
-        features = encoder(inputs["color_aug", 0, 0])
-        output = depth_decoder(features)
-
-        pred_disp, _ = disp_to_depth(output[("disp", 0)], self.opt.min_depth, self.opt.max_depth)
-        pred_disp = pred_disp.cpu()[:, 0].detach().numpy()
-
-        if self.opt.post_process:
-            N = pred_disp.shape[0] // 2
-            pred_disp = batch_post_process_disparity(pred_disp[:N], pred_disp[N:, :, ::-1])
-
-        output_path = os.path.join(
-           self. opt.load_weights_folder, "disps_{}_imgOnline.npy".format(self.step))
-        print("-> Saving predicted disparities to ", output_path)
-        np.save(output_path, pred_disp)
+        for self.epoch in range(self.opt.num_epochs):
+            self.run_epoch()
+            # if (self.epoch + 1) % self.opt.save_frequency == 0:
+                
 
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
         print("Training")
+        self.set_train()
+        fpath = os.path.join(os.path.dirname(__file__), "splits", self.opt.split, "{}_files.txt")
+        val_filenames = readlines(fpath.format("train"))
+        img_ext = '.png' if self.opt.png else '.jpg'
+        xxMax = round(len(val_filenames)/25)
 
-        for batch_idx, inputs in enumerate(self.online_loader):
-            self.step = 0
+        for batch_idx, inputs in enumerate(self.train_loader):
+
             before_op_time = time.time()
 
-            while self.step < self.opt.num_steps:
+            outputs, losses = self.process_batch(inputs)
 
-                self.set_train()
-                outputs, losses = self.process_batch(inputs)
-
-                self.model_optimizer.zero_grad()
-                losses["loss"].backward()
-                self.model_optimizer.step()
-                
-                self.onlineInference(inputs)
-                
-                self.step += 1
+            self.model_optimizer.zero_grad()
+            losses["loss"].backward()
+            self.model_optimizer.step()
 
             duration = time.time() - before_op_time
 
-            # log less frequently after the first 2000 steps to save time & disk space
-            early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
-            late_phase = self.step % 2000 == 0
+            if self.step % 25 == 0:
+                xx = int(self.step / 25)
+                if xx >= xxMax :
+                    break 
 
-            if early_phase or late_phase:
-                self.log_time(batch_idx, duration, losses["loss"].cpu().data)
+                val_dataset = self.dataset(
+                    self.opt.data_path, val_filenames[xx*25:(xx+1)*25], self.opt.height, self.opt.width,
+                    self.opt.frame_ids, 4, is_train=False, img_ext=img_ext)
+                self.val_loader = DataLoader(
+                    val_dataset, self.opt.batch_size, True,
+                    num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+                self.val_iter = iter(self.val_loader)
+                
+                # self.log_time(batch_idx, duration, losses["loss"].cpu().data)
 
-                if "depth_gt" in inputs:
-                    self.compute_depth_losses(inputs, outputs, losses)
+                # if "depth_gt" in inputs:
+                #     self.compute_depth_losses(inputs, outputs, losses)
 
-                self.log("online", inputs, outputs, losses)
+                # self.log("train", inputs, outputs, losses)
+                self.val(xx)
 
-    def batch_post_process_disparity(l_disp, r_disp):
-        """Apply the disparity post-processing method as introduced in Monodepthv1
-        """
-        _, h, w = l_disp.shape
-        m_disp = 0.5 * (l_disp + r_disp)
-        l, _ = np.meshgrid(np.linspace(0, 1, w), np.linspace(0, 1, h))
-        l_mask = (1.0 - np.clip(20 * (l - 0.05), 0, 1))[None, ...]
-        r_mask = l_mask[:, :, ::-1]
-        return r_mask * l_disp + l_mask * r_disp + (1.0 - l_mask - r_mask) * m_disp
-        
+                self.save_model(xx)
 
+            self.step += 1
 
+        self.model_lr_scheduler.step()
 
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
@@ -300,7 +269,6 @@ class OnlineTrainer:
             features = self.models["encoder"](inputs["color_aug", 0, 0])
             outputs = self.models["depth"](features)
 
-       
         if self.opt.predictive_mask:
             outputs["predictive_mask"] = self.models["predictive_mask"](features)
 
@@ -369,6 +337,38 @@ class OnlineTrainer:
                         axisangle[:, i], translation[:, i])
 
         return outputs
+
+    def val(self,xx):
+        """Validate the model on a single minibatch
+        """
+        self.set_eval()
+        try:
+            inputs = self.val_iter.next()
+        except StopIteration:
+            self.val_iter = iter(self.val_loader)
+            inputs = self.val_iter.next()
+
+        with torch.no_grad():
+            outputs, losses = self.process_batch(inputs)
+
+            self.log_time(4, 4, losses["loss"].cpu().data)
+
+            if "depth_gt" in inputs:
+                self.compute_depth_losses(inputs, outputs, losses)
+
+                if not os.path.exists(os.path.join(self.log_path,"metrics_evol.txt")):
+                    with open(os.path.join(self.log_path,"metrics_evol.txt"), 'w'): pass
+                
+                with open (os.path.join(self.log_path,"metrics_evol.txt"), 'a') as f:
+                    f.write(str(xx*25) + "-" + str((xx+1)*25) + " :    |  ")
+                    for metric in self.depth_metric_names:
+                        f.write(metric + " : " + str(losses[metric]) + "  |  ")
+                    f.write("\n")
+
+            self.log("val", inputs, outputs, losses)
+            del inputs, outputs, losses
+
+        self.set_train()
 
     def generate_images_pred(self, inputs, outputs):
         """Generate the warped (reprojected) color images for a minibatch.
@@ -524,7 +524,7 @@ class OnlineTrainer:
         """
         depth_pred = outputs[("depth", 0, 0)]
         depth_pred = torch.clamp(F.interpolate(
-            depth_pred, [480, 640], mode="bilinear", align_corners=False), 1e-3, 80)
+            depth_pred, [544, 1280], mode="bilinear", align_corners=False), 1e-3, 80)
         depth_pred = depth_pred.detach()
 
         depth_gt = inputs["depth_gt"]
@@ -549,14 +549,11 @@ class OnlineTrainer:
     def log_time(self, batch_idx, duration, loss):
         """Print a logging statement to the terminal
         """
-        samples_per_sec = self.opt.batch_size / duration
         time_sofar = time.time() - self.start_time
         training_time_left = (
             self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
-        print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}" + \
-            " | loss: {:.5f} | time elapsed: {} | time left: {}"
-        print(print_string.format("NOEPOCH", batch_idx, samples_per_sec, loss,
-              sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
+        print_string = "time elapsed: {} | time left: {}"
+        print(print_string.format(sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
 
     def log(self, mode, inputs, outputs, losses):
         """Write an event to the tensorboard events file
@@ -591,6 +588,39 @@ class OnlineTrainer:
                     writer.add_image(
                         "automask_{}/{}".format(s, j),
                         outputs["identity_selection/{}".format(s)][j][None, ...], self.step)
+
+    def save_opts(self):
+        """Save options to disk so we know what we ran this experiment with
+        """
+        models_dir = os.path.join(self.log_path, "models")
+        if not os.path.exists(models_dir):
+            os.makedirs(models_dir)
+        to_save = self.opt.__dict__.copy()
+
+        with open(os.path.join(models_dir, 'opt.json'), 'w') as f:
+            json.dump(to_save, f, indent=2)
+
+    def save_model(self, xx):
+        """Save model weights to disk
+        """
+        save_folder = os.path.join(self.log_path, "models", "segment_{}".format(xx))
+        if not os.path.exists(save_folder):
+            os.makedirs(save_folder)
+
+        for model_name, model in self.models.items():
+            save_path = os.path.join(save_folder, "{}.pth".format(model_name))
+            to_save = model.state_dict()
+            if model_name == 'encoder':
+                # save the sizes - these are needed at prediction time
+                to_save['height'] = self.opt.height
+                to_save['width'] = self.opt.width
+                to_save['use_stereo'] = self.opt.use_stereo
+            torch.save(to_save, save_path)
+
+        save_path = os.path.join(save_folder, "{}.pth".format("adam"))
+        torch.save(self.model_optimizer.state_dict(), save_path)
+
+
 
     def load_model(self):
         """Load model(s) from disk
